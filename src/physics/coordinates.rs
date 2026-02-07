@@ -10,6 +10,10 @@ pub struct Coordinates {
 }
 
 impl Coordinates {
+    pub fn new(x: i32, y: i32, z: i32) -> Self {
+        Self { x, y, z }
+    }
+
     /// Returns the six face-adjacent block positions.
     pub fn neighbors(&self) -> [Coordinates; 6] {
         [
@@ -20,5 +24,31 @@ impl Coordinates {
             Coordinates { x: self.x,     y: self.y,     z: self.z + 1 },
             Coordinates { x: self.x,     y: self.y,     z: self.z - 1 },
         ]
+    }
+}
+
+use std::ops::{Add, Sub};
+
+impl Add for Coordinates {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+            z: self.z + rhs.z,
+        }
+    }
+}
+
+impl Sub for Coordinates {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+            z: self.z - rhs.z,
+        }
     }
 }

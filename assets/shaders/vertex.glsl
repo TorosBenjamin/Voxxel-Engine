@@ -12,8 +12,7 @@ uniform vec3 uUVOffset;
 out vec2 vTexCoords;
 flat out float vLayer;
 out vec3 vLocalPos;
-out float vSkyLight;
-out float vBlockLight;
+out vec3 vLight;
 
 void main() {
     // --- Word 1: Geometry (aPacked) ---
@@ -26,14 +25,14 @@ void main() {
     uint face = (aPacked >> 25u) & 7u;
 
     // --- Word 2: Light + Texture Layer (aLayer) ---
-    // Layout: sky_light:4, block_light:4, texture_layer:24
-    uint skyLight = aLayer & 0xFu;
-    uint blockLight = (aLayer >> 4u) & 0xFu;
-    uint textureLayer = aLayer >> 8u;
+    // Layout: r:8, g:8, b:8, texture_layer:8
+    uint r = aLayer & 0xFFu;
+    uint g = (aLayer >> 8u) & 0xFFu;
+    uint b = (aLayer >> 16u) & 0xFFu;
+    uint textureLayer = (aLayer >> 24u) & 0xFFu;
 
     vLayer = float(textureLayer);
-    vSkyLight = float(skyLight) / 15.0;
-    vBlockLight = float(blockLight) / 15.0;
+    vLight = vec3(float(r), float(g), float(b)) / 255.0;
 
     // Chunk-local position for lightmap UV sampling
     vLocalPos = vec3(float(x), float(y), float(z));
