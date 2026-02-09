@@ -4,8 +4,8 @@ use crate::physics::coordinates::Coordinates;
 
 /// Propagates block light from point sources using BFS flood fill.
 ///
-/// Each RGB channel is attenuated independently by `attenuation` per block of distance.
-/// Light only spreads through transparent blocks (as reported by `world`).
+/// Each RGB channel is attenuated independently by `attenuation` per block of distance,
+/// plus the opacity of the destination block. Light cannot enter fully opaque blocks (opacity 255).
 pub fn propagate(
     world: &mut dyn LightingWorld,
     seeds: &[Coordinates],
@@ -17,15 +17,17 @@ pub fn propagate(
         let current = world.get_light(source_cords);
 
         for neighbour_cords in source_cords.neighbors() {
-            // If the neighbor is not transparent, the propagation won't continue
-            if !world.is_transparent(neighbour_cords) {
+            let opacity = world.get_opacity(neighbour_cords);
+            // Fully opaque blocks block all light
+            if opacity == 255 {
                 continue;
             }
 
+            let total_att = attenuation.saturating_add(opacity);
             let attenuated = [
-                current[0].saturating_sub(attenuation),
-                current[1].saturating_sub(attenuation),
-                current[2].saturating_sub(attenuation),
+                current[0].saturating_sub(total_att),
+                current[1].saturating_sub(total_att),
+                current[2].saturating_sub(total_att),
             ];
 
             // If the light level is 0 return
@@ -43,7 +45,7 @@ pub fn propagate(
                     neighbor[2].max(attenuated[2]),
                 ];
                 world.set_light(neighbour_cords, merged);
-                queue.push_back((neighbour_cords));
+                queue.push_back(neighbour_cords);
             }
         }
     }
@@ -77,10 +79,12 @@ pub fn unpropagate(
             // If the neighbor has light, we need to check if it came from the block we're removing
             if neighbor_light != [0, 0, 0] {
                 // Is this neighbor's light an attenuated version of our old light?
-                // We check if it's equal to (old - attenuation)
-                let is_derived = neighbor_light[0] == old_light[0].saturating_sub(attenuation) &&
-                    neighbor_light[1] == old_light[1].saturating_sub(attenuation) &&
-                    neighbor_light[2] == old_light[2].saturating_sub(attenuation);
+                // Account for opacity of the neighbor block
+                let neighbor_opacity = world.get_opacity(neighbor_pos);
+                let total_att = attenuation.saturating_add(neighbor_opacity);
+                let is_derived = neighbor_light[0] == old_light[0].saturating_sub(total_att) &&
+                    neighbor_light[1] == old_light[1].saturating_sub(total_att) &&
+                    neighbor_light[2] == old_light[2].saturating_sub(total_att);
 
                 if is_derived {
                     // It's part of the same light "tree", so remove it
@@ -105,8 +109,9 @@ pub fn unpropagate(
 
 /// Propagates sky light downward and then spreads it via BFS.
 ///
-/// For each (x, z) column, all voxels above the highest opaque block receive full `sky_color`.
-/// Below that, light spreads through transparent blocks with `attenuation` per step.
+/// For each (x, z) column, sky light starts at full `sky_color` and attenuates
+/// by each block's opacity as it passes through. Fully opaque blocks (opacity 255)
+/// stop the column entirely.
 pub fn propagate_sky(
     world: &mut dyn LightingWorld,
     min: Coordinates,
@@ -118,19 +123,30 @@ pub fn propagate_sky(
     // We scan the XZ area provided and drop light from the top
     for x in min.x..=max.x {
         for z in min.z..=max.z {
+            let mut sky = sky_color;
             // Start from the highest Y and work down
             for y in (min.y..=max.y).rev() {
                 let coords = Coordinates::new(x, y, z);
+                let opacity = world.get_opacity(coords);
 
-                if world.is_transparent(coords) {
-                    // This block sees the sky
-                    world.set_light(coords, sky_color);
-                    seeds.push(coords);
-                } else {
-                    // Hit something opaque; the rest of this column is in shadow
-                    // (until the BFS spreads light into it horizontally)
+                if opacity == 255 {
+                    // Hit something fully opaque; the rest of this column is in shadow
                     break;
                 }
+
+                // Attenuate sky by block opacity (no distance penalty vertically)
+                sky = [
+                    sky[0].saturating_sub(opacity),
+                    sky[1].saturating_sub(opacity),
+                    sky[2].saturating_sub(opacity),
+                ];
+
+                if sky == [0, 0, 0] {
+                    break;
+                }
+
+                world.set_light(coords, sky);
+                seeds.push(coords);
             }
         }
     }
@@ -145,30 +161,32 @@ pub fn propagate_sky(
 pub fn unpropagate_sky(
     world: &mut dyn LightingWorld,
     placed_pos: Coordinates,
-    sky_color: [u8; 3],
+    _sky_color: [u8; 3],
     attenuation: u8,
 ) {
     let mut removal_seeds = Vec::new();
 
     // 1. Trace the vertical shadow column
-    // Everything directly below the placed block that had full sky light
-    // must be marked for removal.
+    // Everything directly below the placed block that had sky light
+    // and is not fully opaque must be marked for removal.
     let mut current_y = placed_pos.y - 1;
 
-    // We loop downward until we hit an opaque block or a block that
-    // already didn't have full sky light.
     loop {
         let current_pos = Coordinates::new(placed_pos.x, current_y, placed_pos.z);
+        let opacity = world.get_opacity(current_pos);
 
-        // If the block was previously "full sky", it's now shadowed.
-        if world.get_light(current_pos) == sky_color {
-            removal_seeds.push(current_pos);
-        } else {
-            // We reached a block that was already in shadow or is opaque.
+        if opacity == 255 {
             break;
         }
 
-        if current_y == 0 { break; } // Prevent underflow
+        let light = world.get_light(current_pos);
+        if light != [0, 0, 0] {
+            removal_seeds.push(current_pos);
+        } else {
+            break;
+        }
+
+        if current_y == 0 { break; }
         current_y -= 1;
     }
 

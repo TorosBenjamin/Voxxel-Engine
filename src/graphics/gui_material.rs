@@ -1,5 +1,5 @@
 use crate::graphics::shader::Shader;
-use crate::graphics::texture::Texture;
+use crate::graphics::texture::texture::Texture;
 use crate::graphics::uv_rect::UvRect;
 
 /// A shader and texture pair for immediate-mode GUI rendering.

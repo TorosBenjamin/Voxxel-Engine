@@ -5,15 +5,16 @@ mod tests {
     use crate::lighting::propagation::{propagate, propagate_sky};
     use crate::physics::coordinates::Coordinates;
 
-    /// Test world that wraps a Lightmap with a transparency function.
-    struct TestWorld<F: Fn(i32, i32, i32) -> bool> {
+    /// Test world that wraps a Lightmap with an opacity function.
+    /// F returns 0 for transparent, 255 for opaque, or values in between for semi-opaque.
+    struct TestWorld<F: Fn(i32, i32, i32) -> u8> {
         lm: Lightmap,
-        is_transparent: F,
+        get_opacity_fn: F,
     }
 
-    impl<F: Fn(i32, i32, i32) -> bool> TestWorld<F> {
-        fn new(w: u32, h: u32, d: u32, is_transparent: F) -> Self {
-            Self { lm: Lightmap::new(w, h, d), is_transparent }
+    impl<F: Fn(i32, i32, i32) -> u8> TestWorld<F> {
+        fn new(w: u32, h: u32, d: u32, get_opacity_fn: F) -> Self {
+            Self { lm: Lightmap::new(w, h, d), get_opacity_fn }
         }
 
         fn get(&self, x: u32, y: u32, z: u32) -> [u8; 3] {
@@ -27,12 +28,12 @@ mod tests {
         }
     }
 
-    impl<F: Fn(i32, i32, i32) -> bool> LightingWorld for TestWorld<F> {
-        fn is_transparent(&self, cords: Coordinates) -> bool {
+    impl<F: Fn(i32, i32, i32) -> u8> LightingWorld for TestWorld<F> {
+        fn get_opacity(&self, cords: Coordinates) -> u8 {
             if !self.in_bounds(cords) {
-                return false;
+                return 255;
             }
-            (self.is_transparent)(cords.x, cords.y, cords.z)
+            (self.get_opacity_fn)(cords.x, cords.y, cords.z)
         }
 
         fn get_light(&self, cords: Coordinates) -> [u8; 3] {
@@ -50,7 +51,7 @@ mod tests {
     }
 
     /// Helper to seed light sources and propagate.
-    fn seed_and_propagate<F: Fn(i32, i32, i32) -> bool>(
+    fn seed_and_propagate<F: Fn(i32, i32, i32) -> u8>(
         world: &mut TestWorld<F>,
         sources: &[(u32, u32, u32, [u8; 3])],
         attenuation: u8,
@@ -64,8 +65,8 @@ mod tests {
         propagate(world, &seeds, attenuation);
     }
 
-    fn open(_x: i32, _y: i32, _z: i32) -> bool { true }
-    fn wall_at_x2(x: i32, _y: i32, _z: i32) -> bool { x != 2 }
+    fn open(_x: i32, _y: i32, _z: i32) -> u8 { 0 }
+    fn wall_at_x2(x: i32, _y: i32, _z: i32) -> u8 { if x == 2 { 255 } else { 0 } }
 
     #[test]
     fn propagate_single_source_spreads() {
@@ -89,7 +90,7 @@ mod tests {
 
     #[test]
     fn propagate_sky_fills_above_ground() {
-        let mut world = TestWorld::new(3, 5, 3, |_x, y, _z| y != 2);
+        let mut world = TestWorld::new(3, 5, 3, |_x, y, _z| if y == 2 { 255 } else { 0 });
         let min = Coordinates::new(0, 0, 0);
         let max = Coordinates::new(2, 4, 2);
         propagate_sky(&mut world, min, max, [200, 200, 180], 17);
@@ -103,8 +104,8 @@ mod tests {
     #[test]
     fn propagate_sky_leaks_through_gap() {
         let mut world = TestWorld::new(5, 5, 5, |x, y, z| {
-            if y == 2 && !(x == 0 && z == 0) { return false; }
-            true
+            if y == 2 && !(x == 0 && z == 0) { return 255; }
+            0
         });
         let min = Coordinates::new(0, 0, 0);
         let max = Coordinates::new(4, 4, 4);
@@ -141,7 +142,7 @@ mod tests {
 
     #[test]
     fn propagate_fully_opaque_grid() {
-        let mut world = TestWorld::new(5, 5, 5, |_, _, _| false);
+        let mut world = TestWorld::new(5, 5, 5, |_, _, _| 255);
         seed_and_propagate(&mut world, &[(2, 2, 2, [255, 255, 255])], 17);
 
         assert_eq!(world.get(2, 2, 2), [255, 255, 255]);
@@ -280,7 +281,7 @@ mod tests {
 
     #[test]
     fn propagate_sky_fully_opaque_ceiling() {
-        let mut world = TestWorld::new(3, 4, 3, |_x, y, _z| y != 3);
+        let mut world = TestWorld::new(3, 4, 3, |_x, y, _z| if y == 3 { 255 } else { 0 });
         let min = Coordinates::new(0, 0, 0);
         let max = Coordinates::new(2, 3, 2);
         propagate_sky(&mut world, min, max, [200, 200, 180], 17);
@@ -295,8 +296,8 @@ mod tests {
     #[test]
     fn propagate_sky_and_block_light_combine() {
         let mut world = TestWorld::new(5, 5, 5, |x, y, z| {
-            if y == 2 && !(x == 2 && z == 2) { return false; }
-            true
+            if y == 2 && !(x == 2 && z == 2) { return 255; }
+            0
         });
         let min = Coordinates::new(0, 0, 0);
         let max = Coordinates::new(4, 4, 4);
@@ -320,7 +321,7 @@ mod tests {
 
     #[test]
     fn propagate_light_wraps_around_obstacle() {
-        let mut world = TestWorld::new(5, 2, 1, |x, y, _z| !(x == 2 && y == 0));
+        let mut world = TestWorld::new(5, 2, 1, |x, y, _z| if x == 2 && y == 0 { 255 } else { 0 });
         seed_and_propagate(&mut world, &[(0, 0, 0, [255, 255, 255])], 17);
 
         assert_eq!(world.get(2, 0, 0), [0, 0, 0]);
@@ -347,10 +348,10 @@ mod tests {
     fn propagate_sky_varying_terrain_height() {
         let mut world = TestWorld::new(3, 6, 1, |x, y, _z| {
             match x {
-                0 => y > 1,
-                1 => y > 3,
-                2 => y > 0,
-                _ => true,
+                0 => if y > 1 { 0 } else { 255 },
+                1 => if y > 3 { 0 } else { 255 },
+                2 => if y > 0 { 0 } else { 255 },
+                _ => 0,
             }
         });
         let min = Coordinates::new(0, 0, 0);
@@ -367,5 +368,40 @@ mod tests {
 
         assert_eq!(world.get(2, 1, 0), [255, 255, 255]);
         assert_eq!(world.get(2, 0, 0), [0, 0, 0]);
+    }
+
+    #[test]
+    fn propagate_semi_opaque_block_attenuates() {
+        // A semi-opaque block with opacity=30 should add to attenuation
+        let mut world = TestWorld::new(5, 1, 1, |x, _, _| {
+            if x == 2 { 30 } else { 0 }
+        });
+        seed_and_propagate(&mut world, &[(0, 0, 0, [255, 255, 255])], 17);
+
+        // At x=1: attenuated by 17 (distance) = 238
+        assert_eq!(world.get(1, 0, 0), [238, 238, 238]);
+        // At x=2: attenuated by 17 (distance) + 30 (opacity) = 47 total from x=1's value
+        // 238 - 47 = 191
+        assert_eq!(world.get(2, 0, 0), [191, 191, 191]);
+        // At x=3: attenuated by 17 (distance) from x=2's value = 191 - 17 = 174
+        assert_eq!(world.get(3, 0, 0), [174, 174, 174]);
+    }
+
+    #[test]
+    fn propagate_sky_through_semi_opaque() {
+        // Semi-opaque blocks at y=3 with opacity=50 should dim sky light
+        let mut world = TestWorld::new(1, 5, 1, |_x, y, _z| {
+            if y == 3 { 50 } else { 0 }
+        });
+        let min = Coordinates::new(0, 0, 0);
+        let max = Coordinates::new(0, 4, 0);
+        propagate_sky(&mut world, min, max, [200, 200, 200], 17);
+
+        // y=4: full sky (opacity 0)
+        assert_eq!(world.get(0, 4, 0), [200, 200, 200]);
+        // y=3: attenuated by opacity 50 (no distance penalty in column)
+        assert_eq!(world.get(0, 3, 0), [150, 150, 150]);
+        // y=2: no further attenuation in column (opacity 0)
+        assert_eq!(world.get(0, 2, 0), [150, 150, 150]);
     }
 }

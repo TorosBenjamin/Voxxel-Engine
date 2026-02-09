@@ -4,6 +4,7 @@ use crate::render::render_context::RenderContext;
 use crate::render::render_queue::RenderQueue;
 use crate::resource::resource_manager::ResourceAccess;
 use crate::graphics::material::TextureBinding;
+use crate::render::render_environment::{RenderEnvironment};
 
 pub struct Renderer;
 
@@ -15,7 +16,7 @@ impl Renderer {
     pub fn render(&self, ctx: &mut RenderContext, resources: &impl ResourceAccess) {
         // Opaque pass
         ctx.opaque_queue.sort_by_material();
-        self.render_queue(&ctx.opaque_queue, &ctx.view, &ctx.projection, resources);
+        self.render_queue(&ctx.opaque_queue, &ctx.view, &ctx.projection, resources, &ctx.environment);
 
         // Transparent pass (blend on, depth writes off to avoid transparent-on-transparent occlusion)
         unsafe {
@@ -24,7 +25,7 @@ impl Renderer {
             gl::DepthMask(gl::FALSE);
         }
         ctx.transparent_queue.sort_by_material();
-        self.render_queue(&ctx.transparent_queue, &ctx.view, &ctx.projection, resources);
+        self.render_queue(&ctx.transparent_queue, &ctx.view, &ctx.projection, resources, &ctx.environment);
         unsafe {
             gl::DepthMask(gl::TRUE);
         }
@@ -35,7 +36,7 @@ impl Renderer {
         }
         let identity = glm::identity::<f32, 4>();
         ctx.gui_queue.sort_by_material();
-        self.render_queue(&ctx.gui_queue, &identity, &ctx.gui_projection, resources);
+        self.render_queue(&ctx.gui_queue, &identity, &ctx.gui_projection, resources, &ctx.environment);
         // NOTE: Blend stays enabled and depth test stays disabled here.
         // The engine restores GL state after render_ui() so that immediate-mode
         // GUI drawing (crosshair, text) also benefits from alpha blending.
@@ -47,6 +48,7 @@ impl Renderer {
         view: &glm::Mat4,
         projection: &glm::Mat4,
         resources: &impl ResourceAccess,
+        globals: &RenderEnvironment,
     ) {
         let mut last_shader_id: u32 = 0;
         let mut last_material_id: u32 = u32::MAX;
@@ -66,6 +68,11 @@ impl Renderer {
                 shader.use_program();
                 shader.set_mat4("view", view);
                 shader.set_mat4("projection", projection);
+
+                // General Environmental Uniforms
+                shader.set_vec3("u_SkyColor", &globals.sky_color);
+                shader.set_f32("u_Ambient", globals.ambient);
+
                 last_shader_id = shader.id;
                 // Force material rebind since shader changed
                 last_material_id = u32::MAX;

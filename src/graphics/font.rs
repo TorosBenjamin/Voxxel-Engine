@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use crate::graphics::texture::Texture;
 use crate::graphics::uv_rect::UvRect;
 use crate::graphics::gpu_mesh::GpuMesh;
 use crate::graphics::vertex::VertexPosUv;
 use nalgebra_glm as glm;
+use crate::graphics::texture::texture::Texture;
 
 /// Metrics and UV data for a single rasterized character.
 pub struct Glyph {

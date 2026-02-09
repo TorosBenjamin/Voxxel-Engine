@@ -1,6 +1,8 @@
 use crate::core::handle::Handle;
 use crate::graphics::shader::Shader;
-use crate::graphics::texture::{Texture, Texture3D, TextureArray};
+use crate::graphics::texture::texture::Texture;
+use crate::graphics::texture::texture_3d::Texture3D;
+use crate::graphics::texture::texture_array::TextureArray;
 
 /// Specifies which texture type is bound to a material slot.
 pub enum TextureBinding {
